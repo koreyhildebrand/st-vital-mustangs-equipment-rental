@@ -216,14 +216,13 @@ if st.session_state.get("authentication_status") is True:
                 else:
                     p_size = ""
 
-                # ========== OTHER SIMPLE ITEMS ==========
+                # ========== OTHER ITEMS ==========
                 k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
                 t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
                 hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
                 tail_taken = st.checkbox("Tailbone Taken", value=to_bool(player.get("Tailbone_Taken")), key=f"tail_taken_{idx}")
                 b_taken = st.checkbox("Belt Taken", value=to_bool(player.get("Belt_Taken")), key=f"belt_taken_{idx}")
 
-                # ========== PRACTICE JERSEY ==========
                 practice_color = st.selectbox("Practice Jersey Color", ["","Red","Black","White","Other"],
                                               index=safe_select_index(["","Red","Black","White","Other"], player.get("Practice_Jersey_Color")),
                                               key=f"practice_color_{idx}")
@@ -231,7 +230,6 @@ if st.session_state.get("authentication_status") is True:
                 game_jersey = st.text_input("Game Jersey #", value=str(player.get("Game_Jersey_No", "")),
                                             key=f"game_jersey_{idx}")
 
-                # ========== SAVE BUTTON ==========
                 if st.button("💾 Save Rental", key=f"save_{idx}", type="primary"):
                     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                     updates = {
@@ -252,7 +250,6 @@ if st.session_state.get("authentication_status") is True:
                     st.success("Rental saved successfully!")
                     st.rerun()
 
-                # ========== RETURN SECTION ==========
                 if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]) and not return_date:
                     if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
                         for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]:
@@ -262,34 +259,48 @@ if st.session_state.get("authentication_status") is True:
                         st.success("Equipment returned!")
                         st.rerun()
 
-    # ====================== PRIVATE RENTAL ======================
+    # ====================== PRIVATE RENTAL (UPDATED) ======================
     elif st.session_state.page == "Private Rental":
         st.header("➕ Add Private Rental Player")
-        with st.form("private"):
+        st.caption("Fill in the details below and click Create Player. Fields will clear automatically after adding.")
+
+        with st.form("private_form", clear_on_submit=True):
             c1, c2 = st.columns(2)
             with c1:
                 first = st.text_input("First Name*")
                 last = st.text_input("Last Name*")
-                email = st.text_input("Email")
+                email = st.text_input("Email (optional)")
             with c2:
-                phone = st.text_input("Phone")
-                team = st.text_input("Team/Group", value="Private Rental")
+                phone = st.text_input("Phone (optional)")
+                team = st.text_input("Team / Group", value="Private Rental")
 
-            if st.form_submit_button("Create Player"):
+            submitted = st.form_submit_button("Create Player", type="primary")
+
+            if submitted:
                 if first and last:
                     pid = generate_player_id(first, last)
                     new_row = {col: "" for col in equip_df.columns}
                     new_row.update({
-                        "PlayerID": pid, "First Name": first, "Last Name": last,
-                        "Email": email, "Phone": phone, "Team Assignment": team,
-                        "Helmet_Taken": False, "Shoulder_Taken": False, "Pants_Taken": False,
-                        "Kneepads_Taken": False, "Thighpads_Taken": False,
-                        "Hippads_Taken": False, "Tailbone_Taken": False, "Belt_Taken": False
+                        "PlayerID": pid,
+                        "First Name": first.strip(),
+                        "Last Name": last.strip(),
+                        "Email": email.strip(),
+                        "Phone": phone.strip(),
+                        "Team Assignment": team.strip() or "Private Rental",
+                        "Helmet_Taken": False,
+                        "Shoulder_Taken": False,
+                        "Pants_Taken": False,
+                        "Kneepads_Taken": False,
+                        "Thighpads_Taken": False,
+                        "Hippads_Taken": False,
+                        "Tailbone_Taken": False,
+                        "Belt_Taken": False
                     })
                     equip_df = pd.concat([equip_df, pd.DataFrame([new_row])], ignore_index=True)
                     save_equipment_df(equip_df)
-                    st.success("Player added!")
-                    st.rerun()
+                    st.success(f"✅ Player '{first} {last}' added successfully! You can now add another player.")
+                else:
+                    st.error("First Name and Last Name are required.")
 
     # ====================== DASHBOARD ======================
     elif st.session_state.page == "All Rentals":
