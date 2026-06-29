@@ -42,9 +42,10 @@ if "page" not in st.session_state:
     st.session_state.page = "Rental"
 
 # ====================== GOOGLE SHEETS + AUTH INITIALIZATION ======================
-@st.cache_resource
 def init_services():
-    """Initialize gspread client and authenticator. Runs once."""
+    """Initialize gspread client and authenticator. 
+    Note: No caching decorator because streamlit-authenticator uses widgets internally.
+    """
     try:
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -83,12 +84,10 @@ def init_services():
         st.session_state.authenticator = authenticator
         st.session_state.client = client
         return authenticator, sheet
+
     except Exception as e:
         st.error(f"Initialization error: {str(e)}")
         st.stop()
-
-authenticator, sheet = init_services()
-
 # ====================== HELPER FUNCTIONS ======================
 def to_bool(val) -> bool:
     if pd.isna(val) or val == "" or val is None:
