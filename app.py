@@ -27,46 +27,55 @@ st.markdown("""
 if "page" not in st.session_state:
     st.session_state.page = "Rental"
 
-# ====================== INITIALIZATION ======================
+# ====================== INITIALIZATION (with retry) ======================
 def init_services():
-    try:
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        client = gspread.authorize(creds)
+    """Initialize Google Sheets + Authenticator with retry on rate limits."""
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds_dict = st.secrets["gcp_service_account"]
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            client = gspread.authorize(creds)
 
-        if SPREADSHEET_KEY:
-            sheet = client.open_by_key(SPREADSHEET_KEY)
-        else:
-            sheet = client.open("StVitalMustangs_Equipment_Rentals")
+            if SPREADSHEET_KEY:
+                sheet = client.open_by_key(SPREADSHEET_KEY)
+            else:
+                sheet = client.open("StVitalMustangs_Equipment_Rentals")
 
-        users_ws = sheet.worksheet(USERS_WS)
-        user_data = users_ws.get_all_records()
+            # Read Users sheet with retry
+            users_ws = sheet.worksheet(USERS_WS)
+            user_data = users_ws.get_all_records()
 
-        credentials = {"usernames": {}}
-        for user in user_data:
-            uname = str(user.get("username", "")).strip().lower()
-            if uname:
-                credentials["usernames"][uname] = {
-                    "name": user.get("name", uname),
-                    "email": user.get("email", ""),
-                    "password": user.get("password", ""),
-                }
+            credentials = {"usernames": {}}
+            for user in user_data:
+                uname = str(user.get("username", "")).strip().lower()
+                if uname:
+                    credentials["usernames"][uname] = {
+                        "name": user.get("name", uname),
+                        "email": user.get("email", ""),
+                        "password": user.get("password", ""),
+                    }
 
-        authenticator = stauth.Authenticate(
-            credentials=credentials,
-            cookie_name=COOKIE_NAME,
-            key=COOKIE_KEY,
-            cookie_expiry_days=COOKIE_EXPIRY_DAYS,
-        )
+            authenticator = stauth.Authenticate(
+                credentials=credentials,
+                cookie_name=COOKIE_NAME,
+                key=COOKIE_KEY,
+                cookie_expiry_days=COOKIE_EXPIRY_DAYS,
+            )
 
-        st.session_state.sheet = sheet
-        st.session_state.authenticator = authenticator
-        return authenticator, sheet
+            st.session_state.sheet = sheet
+            st.session_state.authenticator = authenticator
+            return authenticator, sheet
 
-    except Exception as e:
-        st.error(f"Setup error: {str(e)}")
-        st.stop()
+        except Exception as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 5  # 5s, 10s, 15s...
+                st.warning(f"Rate limit hit. Retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                st.error(f"Setup error: {str(e)}")
+                st.stop()
 
 
 authenticator, sheet = init_services()
@@ -185,7 +194,6 @@ if st.session_state.get("authentication_status") is True:
 
             with st.expander(f"**{first} {last}** — {team} | {status} | {current}"):
 
-                # ========== HELMET ==========
                 h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")), key=f"helm_taken_{idx}")
                 if h_taken:
                     h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
@@ -198,7 +206,6 @@ if st.session_state.get("authentication_status") is True:
                 else:
                     h_size = h_type = h_date = ""
 
-                # ========== SHOULDER PADS ==========
                 s_taken = st.checkbox("Shoulder Pads Taken", value=to_bool(player.get("Shoulder_Taken")), key=f"shoul_taken_{idx}")
                 if s_taken:
                     s_size = st.selectbox("Shoulder Size", ["","XS","S","M","L","XL","XXL"],
@@ -209,7 +216,6 @@ if st.session_state.get("authentication_status") is True:
                 else:
                     s_size = s_make = ""
 
-                # ========== PANTS (AXL added) ==========
                 p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")), key=f"pants_taken_{idx}")
                 if p_taken:
                     p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"],
@@ -218,7 +224,6 @@ if st.session_state.get("authentication_status") is True:
                 else:
                     p_size = ""
 
-                # ========== OTHER ITEMS ==========
                 k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
                 t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
                 hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
@@ -254,7 +259,6 @@ if st.session_state.get("authentication_status") is True:
                     st.success("Rental saved successfully!")
                     st.rerun()
 
-                # Return section
                 if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]) and not return_date:
                     if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
                         for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]:
@@ -292,15 +296,10 @@ if st.session_state.get("authentication_status") is True:
                         "Email": email.strip(),
                         "Phone": phone.strip(),
                         "Team Assignment": team.strip() or "Private Rental",
-                        "Helmet_Taken": False,
-                        "Shoulder_Taken": False,
-                        "Pants_Taken": False,
-                        "Kneepads_Taken": False,
-                        "Thighpads_Taken": False,
-                        "Hippads_Taken": False,
-                        "Tailbone_Taken": False,
-                        "Belt_Taken": False,
-                        "Mouthguard_Taken": False
+                        "Helmet_Taken": False, "Shoulder_Taken": False, "Pants_Taken": False,
+                        "Kneepads_Taken": False, "Thighpads_Taken": False,
+                        "Hippads_Taken": False, "Tailbone_Taken": False,
+                        "Belt_Taken": False, "Mouthguard_Taken": False
                     })
                     equip_df = pd.concat([equip_df, pd.DataFrame([new_row])], ignore_index=True)
                     save_equipment_df(equip_df)
