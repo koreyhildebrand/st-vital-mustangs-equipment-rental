@@ -77,6 +77,7 @@ def to_bool(val) -> bool:
         return False
     return str(val).strip().lower() in ["true", "1", "yes", "t"]
 
+@st.cache_data(ttl=90)   # ← Caches data for 90 seconds to reduce API reads
 def get_equipment_df() -> pd.DataFrame:
     ws = st.session_state.sheet.worksheet(EQUIPMENT_WS)
     try:
@@ -84,6 +85,7 @@ def get_equipment_df() -> pd.DataFrame:
     except Exception as e:
         if "429" in str(e):
             time.sleep(8)
+            st.cache_data.clear()
             return get_equipment_df()
         st.error(f"Error loading Equipment: {str(e)}")
         return pd.DataFrame()
@@ -112,6 +114,7 @@ def get_equipment_df() -> pd.DataFrame:
 def save_equipment_df(df: pd.DataFrame):
     ws = st.session_state.sheet.worksheet(EQUIPMENT_WS)
     ws.update([df.columns.values.tolist()] + df.fillna("").values.tolist())
+    st.cache_data.clear()   # Clear cache after writing so fresh data is loaded next time
 
 def generate_player_id(first: str, last: str) -> str:
     return f"{first.strip()}_{last.strip()}"
@@ -149,122 +152,142 @@ if st.session_state.get("authentication_status") is True:
     if st.session_state.page == "Rental":
         st.header("📦 Equipment Rental / Return")
 
-        if st.button("🔄 Refresh", type="primary", width="stretch"):
-            st.cache_data.clear()
-            st.rerun()
+        # === NEW TOGGLE TO REDUCE VISUAL NOISE ===
+        show_only_checked_out = st.toggle(
+            "Show only players with equipment checked out", 
+            value=False,
+            help="When enabled, only players who currently have equipment will be shown."
+        )
+
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("🔄 Refresh Data", type="primary"):
+                st.cache_data.clear()
+                st.rerun()
 
         teams = ["All Teams"] + sorted(equip_df.get("Team Assignment", pd.Series()).dropna().unique().tolist())
         selected_team = st.selectbox("Filter by Team", teams)
-        search = st.text_input("🔍 Search")
+        search = st.text_input("🔍 Search by name")
 
         roster = equip_df.copy()
+
+        # Apply team filter
         if selected_team != "All Teams":
             roster = roster[roster["Team Assignment"] == selected_team]
+
+        # Apply search
         if search:
             roster = roster[roster.apply(lambda r: search.lower() in str(r.values).lower(), axis=1)]
 
-        for idx, player in roster.iterrows():
-            first = str(player.get("First Name", ""))
-            last = str(player.get("Last Name", ""))
-            team = player.get("Team Assignment", "—")
+        # === NEW FILTER: Only show checked out equipment ===
+        if show_only_checked_out:
+            taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
+                          "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]
+            roster = roster[roster[taken_cols].applymap(to_bool).any(axis=1)]
 
-            summary_parts = []
-            for col, label in [("Helmet_Taken", "Helmet"), ("Shoulder_Taken", "Shoulder"),
-                               ("Pants_Taken", "Pants"), ("Kneepads_Taken", "Kneepads"),
-                               ("Thighpads_Taken", "Thighpads"), ("Hippads_Taken", "Hippads"),
-                               ("Tailbone_Taken", "Tailbone"), ("Belt_Taken", "Belt"),
-                               ("Mouthguard_Taken", "Mouthguard")]:
-                if to_bool(player.get(col)):
-                    summary_parts.append(label)
-            if player.get("Practice_Jersey_Color"):
-                summary_parts.append(f"Practice {player.get('Practice_Jersey_Color')}")
+        if roster.empty:
+            st.info("No players found with the current filters.")
+        else:
+            st.caption(f"Showing {len(roster)} player(s)")
 
-            current = " | ".join(summary_parts) if summary_parts else "No equipment"
-            return_date = str(player.get("Return_Date", "")).strip()
-            status = "🔄 Rented" if summary_parts and not return_date else "✅ Available"
+            for idx, player in roster.iterrows():
+                first = str(player.get("First Name", ""))
+                last = str(player.get("Last Name", ""))
+                team = player.get("Team Assignment", "—")
 
-            with st.expander(f"**{first} {last}** — {team} | {status} | {current}"):
+                summary_parts = []
+                for col, label in [("Helmet_Taken", "Helmet"), ("Shoulder_Taken", "Shoulder"),
+                                   ("Pants_Taken", "Pants"), ("Kneepads_Taken", "Kneepads"),
+                                   ("Thighpads_Taken", "Thighpads"), ("Hippads_Taken", "Hippads"),
+                                   ("Tailbone_Taken", "Tailbone"), ("Belt_Taken", "Belt"),
+                                   ("Mouthguard_Taken", "Mouthguard")]:
+                    if to_bool(player.get(col)):
+                        summary_parts.append(label)
+                if player.get("Practice_Jersey_Color"):
+                    summary_parts.append(f"Practice {player.get('Practice_Jersey_Color')}")
 
-                # ========== HELMET ==========
-                h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")), key=f"helm_taken_{idx}")
-                if h_taken:
-                    h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
-                                          index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Helmet_Size")),
-                                          key=f"helm_size_{idx}")
-                    h_type = st.text_input("Helmet Type", value=str(player.get("Helmet_Type", "")),
-                                           key=f"helm_type_{idx}")
-                    h_date = st.text_input("Helmet Made Date", value=str(player.get("Helmet_Date", "")),
-                                           key=f"helm_date_{idx}")
-                else:
-                    h_size = h_type = h_date = ""
+                current = " | ".join(summary_parts) if summary_parts else "No equipment"
+                return_date = str(player.get("Return_Date", "")).strip()
+                status = "🔄 Rented" if summary_parts and not return_date else "✅ Available"
 
-                # ========== SHOULDER PADS ==========
-                s_taken = st.checkbox("Shoulder Pads Taken", value=to_bool(player.get("Shoulder_Taken")), key=f"shoul_taken_{idx}")
-                if s_taken:
-                    s_size = st.selectbox("Shoulder Size", ["","XS","S","M","L","XL","XXL"],
-                                          index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Shoulder_Size")),
-                                          key=f"shoul_size_{idx}")
-                    s_make = st.text_input("Shoulder Make / Brand", value=str(player.get("Shoulder_Make", "")),
-                                           key=f"shoul_make_{idx}")
-                else:
-                    s_size = s_make = ""
+                with st.expander(f"**{first} {last}** — {team} | {status} | {current}"):
 
-                # ========== PANTS ==========
-                p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")), key=f"pants_taken_{idx}")
-                if p_taken:
-                    p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"],
-                                          index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"], player.get("Pant_Size")),
-                                          key=f"pant_size_{idx}")
-                else:
-                    p_size = ""
+                    # ========== HELMET ==========
+                    h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")), key=f"helm_taken_{idx}")
+                    if h_taken:
+                        h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
+                                              index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Helmet_Size")),
+                                              key=f"helm_size_{idx}")
+                        h_type = st.text_input("Helmet Type", value=str(player.get("Helmet_Type", "")),
+                                               key=f"helm_type_{idx}")
+                        h_date = st.text_input("Helmet Made Date", value=str(player.get("Helmet_Date", "")),
+                                               key=f"helm_date_{idx}")
+                    else:
+                        h_size = h_type = h_date = ""
 
-                # ========== OTHER ITEMS ==========
-                k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
-                t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
-                hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
-                tail_taken = st.checkbox("Tailbone Taken", value=to_bool(player.get("Tailbone_Taken")), key=f"tail_taken_{idx}")
-                b_taken = st.checkbox("Belt Taken", value=to_bool(player.get("Belt_Taken")), key=f"belt_taken_{idx}")
-                m_taken = st.checkbox("Mouthguard Taken", value=to_bool(player.get("Mouthguard_Taken")), key=f"mouth_taken_{idx}")
+                    # ========== SHOULDER PADS ==========
+                    s_taken = st.checkbox("Shoulder Pads Taken", value=to_bool(player.get("Shoulder_Taken")), key=f"shoul_taken_{idx}")
+                    if s_taken:
+                        s_size = st.selectbox("Shoulder Size", ["","XS","S","M","L","XL","XXL"],
+                                              index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Shoulder_Size")),
+                                              key=f"shoul_size_{idx}")
+                        s_make = st.text_input("Shoulder Make / Brand", value=str(player.get("Shoulder_Make", "")),
+                                               key=f"shoul_make_{idx}")
+                    else:
+                        s_size = s_make = ""
 
-                practice_color = st.selectbox("Practice Jersey Color", ["","Red","Black","White","Other"],
-                                              index=safe_select_index(["","Red","Black","White","Other"], player.get("Practice_Jersey_Color")),
-                                              key=f"practice_color_{idx}")
+                    # ========== PANTS ==========
+                    p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")), key=f"pants_taken_{idx}")
+                    if p_taken:
+                        p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"],
+                                              index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"], player.get("Pant_Size")),
+                                              key=f"pant_size_{idx}")
+                    else:
+                        p_size = ""
 
-                game_jersey = st.text_input("Game Jersey #", value=str(player.get("Game_Jersey_No", "")),
-                                            key=f"game_jersey_{idx}")
+                    # ========== OTHER ITEMS ==========
+                    k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
+                    t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
+                    hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
+                    tail_taken = st.checkbox("Tailbone Taken", value=to_bool(player.get("Tailbone_Taken")), key=f"tail_taken_{idx}")
+                    b_taken = st.checkbox("Belt Taken", value=to_bool(player.get("Belt_Taken")), key=f"belt_taken_{idx}")
+                    m_taken = st.checkbox("Mouthguard Taken", value=to_bool(player.get("Mouthguard_Taken")), key=f"mouth_taken_{idx}")
 
-                # ========== ONLY SAVE BUTTON WRITES TO SHEET ==========
-                if st.button("💾 Save Rental", key=f"save_{idx}", type="primary"):
-                    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                    updates = {
-                        "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Type": h_type, "Helmet_Date": h_date,
-                        "Shoulder_Taken": s_taken, "Shoulder_Make": s_make, "Shoulder_Size": s_size,
-                        "Pants_Taken": p_taken, "Pant_Size": p_size,
-                        "Game_Jersey_No": game_jersey, "Practice_Jersey_Color": practice_color,
-                        "Kneepads_Taken": k_taken, "Thighpads_Taken": t_taken,
-                        "Hippads_Taken": hi_taken, "Tailbone_Taken": tail_taken, "Belt_Taken": b_taken,
-                        "Mouthguard_Taken": m_taken,
-                        "Rental Date": now,
-                        "Return_Date": "" if any([h_taken, s_taken, p_taken, k_taken, t_taken, hi_taken, tail_taken, b_taken, m_taken]) 
-                                       else player.get("Return_Date", "")
-                    }
-                    for k, v in updates.items():
-                        equip_df.loc[idx, k] = v
+                    practice_color = st.selectbox("Practice Jersey Color", ["","Red","Black","White","Other"],
+                                                  index=safe_select_index(["","Red","Black","White","Other"], player.get("Practice_Jersey_Color")),
+                                                  key=f"practice_color_{idx}")
 
-                    save_equipment_df(equip_df)   # ← Only write happens here
-                    st.success("Changes saved to Google Sheet!")
-                    st.rerun()
+                    game_jersey = st.text_input("Game Jersey #", value=str(player.get("Game_Jersey_No", "")),
+                                                key=f"game_jersey_{idx}")
 
-                # ========== RETURN BUTTON (No direct write) ==========
-                if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]) and not return_date:
-                    if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
-                        for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]:
-                            equip_df.loc[idx, c] = False
-                        equip_df.loc[idx, "Return_Date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                        
-                        # Do NOT call save_equipment_df() here
-                        st.info("Return recorded. Click **Save Rental** to write changes to the sheet.")
+                    if st.button("💾 Save Rental", key=f"save_{idx}", type="primary"):
+                        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                        updates = {
+                            "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Type": h_type, "Helmet_Date": h_date,
+                            "Shoulder_Taken": s_taken, "Shoulder_Make": s_make, "Shoulder_Size": s_size,
+                            "Pants_Taken": p_taken, "Pant_Size": p_size,
+                            "Game_Jersey_No": game_jersey, "Practice_Jersey_Color": practice_color,
+                            "Kneepads_Taken": k_taken, "Thighpads_Taken": t_taken,
+                            "Hippads_Taken": hi_taken, "Tailbone_Taken": tail_taken, "Belt_Taken": b_taken,
+                            "Mouthguard_Taken": m_taken,
+                            "Rental Date": now,
+                            "Return_Date": "" if any([h_taken, s_taken, p_taken, k_taken, t_taken, hi_taken, tail_taken, b_taken, m_taken]) 
+                                           else player.get("Return_Date", "")
+                        }
+                        for k, v in updates.items():
+                            equip_df.loc[idx, k] = v
+
+                        save_equipment_df(equip_df)
+                        st.success("Changes saved to Google Sheet!")
                         st.rerun()
+
+                    if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]) and not return_date:
+                        if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
+                            for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]:
+                                equip_df.loc[idx, c] = False
+                            equip_df.loc[idx, "Return_Date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                            st.info("Return recorded. Click **Save Rental** to write to the sheet.")
+                            st.rerun()
 
     # ====================== PRIVATE RENTAL ======================
     elif st.session_state.page == "Private Rental":
