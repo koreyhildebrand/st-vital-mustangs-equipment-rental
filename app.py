@@ -1,6 +1,6 @@
 """
 St. Vital Mustangs Equipment Rental Manager
-Standalone Streamlit app for equipment rentals only.
+Standalone Streamlit app - Equipment focused only
 """
 
 import streamlit as st
@@ -15,29 +15,23 @@ from config import (
     SPREADSHEET_KEY, EQUIPMENT_WS, USERS_WS
 )
 
-# ====================== PAGE CONFIG & STYLING ======================
+# ====================== PAGE CONFIG ======================
 st.set_page_config(page_title=TITLE, layout="wide", page_icon=PAGE_ICON)
 st.title(f"🛡️ {TITLE}")
 
 st.markdown("""
     <style>
         [data-testid="stSidebarNav"] {display: none !important;}
-        .stButton > button[kind="primary"] {background-color: #1E88E5; color: white;}
     </style>
 """, unsafe_allow_html=True)
 
-# ====================== SESSION STATE ======================
 if "page" not in st.session_state:
     st.session_state.page = "Rental"
 
 # ====================== INITIALIZATION ======================
 def init_services():
-    """Initialize Google Sheets + Authenticator (no caching to avoid widget conflict)."""
     try:
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds_dict = st.secrets["gcp_service_account"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
@@ -47,7 +41,6 @@ def init_services():
         else:
             sheet = client.open("StVitalMustangs_Equipment_Rentals")
 
-        # Users sheet for authentication
         users_ws = sheet.worksheet(USERS_WS)
         user_data = users_ws.get_all_records()
 
@@ -70,8 +63,6 @@ def init_services():
 
         st.session_state.sheet = sheet
         st.session_state.authenticator = authenticator
-        st.session_state.client = client
-
         return authenticator, sheet
 
     except Exception as e:
@@ -98,6 +89,9 @@ def get_equipment_df() -> pd.DataFrame:
         st.error(f"Error loading Equipment: {str(e)}")
         return pd.DataFrame()
 
+    # Force object dtype to prevent Arrow typing errors
+    df = df.astype(object)
+
     required_cols = [
         "PlayerID", "First Name", "Last Name", "Rental Date", "Phone", "Email",
         "Team Assignment",
@@ -108,9 +102,12 @@ def get_equipment_df() -> pd.DataFrame:
         "Kneepads_Taken", "Thighpads_Taken", "Hippads_Taken", "Tailbone_Taken", "Belt_Taken",
         "Return_Date"
     ]
+
     for col in required_cols:
         if col not in df.columns:
             df[col] = False if col.endswith("_Taken") else ""
+
+    df = df.astype(object)
     return df
 
 def save_equipment_df(df: pd.DataFrame):
@@ -126,15 +123,14 @@ def safe_select_index(options, current_value, default=0):
     except:
         return default
 
-# ====================== AUTHENTICATION ======================
+# ====================== AUTH ======================
 authenticator.login(location="main")
 
 if st.session_state.get("authentication_status") is True:
     name = st.session_state.name
 
-    # Sidebar
     st.sidebar.success(f"👤 {name}")
-    st.sidebar.caption(f"Equipment Rental Manager • {VERSION}")
+    st.sidebar.caption(f"v{VERSION}")
 
     if st.sidebar.button("🚪 Logout", type="secondary"):
         authenticator.logout("main")
@@ -154,14 +150,13 @@ if st.session_state.get("authentication_status") is True:
     if st.session_state.page == "Rental":
         st.header("📦 Equipment Rental / Return")
 
-        if st.button("🔄 Refresh Data", type="primary", width="stretch"):
+        if st.button("🔄 Refresh", type="primary", width="stretch"):
             st.cache_data.clear()
             st.rerun()
 
         teams = ["All Teams"] + sorted(equip_df.get("Team Assignment", pd.Series()).dropna().unique().tolist())
         selected_team = st.selectbox("Filter by Team", teams)
-
-        search = st.text_input("🔍 Search player")
+        search = st.text_input("🔍 Search")
 
         roster = equip_df.copy()
         if selected_team != "All Teams":
@@ -174,31 +169,32 @@ if st.session_state.get("authentication_status") is True:
             last = str(player.get("Last Name", ""))
             team = player.get("Team Assignment", "—")
 
-            summary = []
-            for col, label in [("Helmet_Taken","Helmet"), ("Shoulder_Taken","Shoulder"), 
-                               ("Pants_Taken","Pants"), ("Kneepads_Taken","Kneepads"),
-                               ("Thighpads_Taken","Thighpads"), ("Hippads_Taken","Hippads"),
-                               ("Tailbone_Taken","Tailbone"), ("Belt_Taken","Belt")]:
+            summary_parts = []
+            for col, label in [("Helmet_Taken", "Helmet"), ("Shoulder_Taken", "Shoulder"),
+                               ("Pants_Taken", "Pants"), ("Kneepads_Taken", "Kneepads"),
+                               ("Thighpads_Taken", "Thighpads"), ("Hippads_Taken", "Hippads"),
+                               ("Tailbone_Taken", "Tailbone"), ("Belt_Taken", "Belt")]:
                 if to_bool(player.get(col)):
-                    summary.append(label)
+                    summary_parts.append(label)
             if player.get("Practice_Jersey_Color"):
-                summary.append(f"Practice {player.get('Practice_Jersey_Color')}")
+                summary_parts.append(f"Practice {player.get('Practice_Jersey_Color')}")
 
-            current_rented = " | ".join(summary) if summary else "No equipment rented"
+            current = " | ".join(summary_parts) if summary_parts else "No equipment"
             return_date = str(player.get("Return_Date", "")).strip()
-            status = "🔄 Rented" if summary and not return_date else "✅ Available"
+            status = "🔄 Rented" if summary_parts and not return_date else "✅ Available"
 
-            with st.expander(f"**{first} {last}** — {team} | {status} | {current_rented}"):
-                with st.form(key=f"rental_{idx}"):
+            with st.expander(f"**{first} {last}** — {team} | {status} | {current}"):
+                with st.form(key=f"form_{idx}"):
                     col1, col2 = st.columns(2)
                     with col1:
                         h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")))
                         if h_taken:
-                            h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"], 
+                            h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
                                                   index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Helmet_Size")))
                             h_date = st.text_input("Helmet Made Date", value=str(player.get("Helmet_Date", "")))
                         else:
-                            h_size, h_date = "", str(player.get("Helmet_Date", ""))
+                            h_size = ""
+                            h_date = str(player.get("Helmet_Date", ""))
 
                         s_taken = st.checkbox("Shoulder Taken", value=to_bool(player.get("Shoulder_Taken")))
                         if s_taken:
@@ -206,7 +202,7 @@ if st.session_state.get("authentication_status") is True:
                                                   index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Shoulder_Size")))
                             s_make = st.text_input("Shoulder Make", value=str(player.get("Shoulder_Make", "")))
                         else:
-                            s_size, s_make = "", ""
+                            s_size = s_make = ""
 
                         p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")))
                         if p_taken:
@@ -233,26 +229,26 @@ if st.session_state.get("authentication_status") is True:
                             "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Date": h_date,
                             "Shoulder_Taken": s_taken, "Shoulder_Make": s_make, "Shoulder_Size": s_size,
                             "Pants_Taken": p_taken, "Pant_Size": p_size,
-                            "Game_Jersey_No": game_jersey,
-                            "Practice_Jersey_Color": practice_color,
+                            "Game_Jersey_No": game_jersey, "Practice_Jersey_Color": practice_color,
                             "Kneepads_Taken": k_taken, "Thighpads_Taken": t_taken,
                             "Hippads_Taken": hi_taken, "Tailbone_Taken": tail_taken, "Belt_Taken": b_taken,
                             "Rental Date": now,
-                            "Return_Date": "" if any([h_taken, s_taken, p_taken, k_taken, t_taken, hi_taken, tail_taken, b_taken]) else player.get("Return_Date", "")
+                            "Return_Date": "" if any([h_taken, s_taken, p_taken, k_taken, t_taken, hi_taken, tail_taken, b_taken]) 
+                                           else player.get("Return_Date", "")
                         }
                         for k, v in updates.items():
-                            equip_df.at[idx, k] = v
+                            equip_df.loc[idx, k] = v          # ← Using .loc[] instead of .at[]
+
                         save_equipment_df(equip_df)
-                        st.success("Saved!")
+                        st.success("Saved successfully!")
                         st.rerun()
 
-                # Return section
+                # Return button
                 if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]) and not return_date:
-                    st.markdown("---")
-                    if st.button("🔄 Return All Equipment", key=f"return_{idx}"):
+                    if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
                         for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]:
-                            equip_df.at[idx, c] = False
-                        equip_df.at[idx, "Return_Date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                            equip_df.loc[idx, c] = False
+                        equip_df.loc[idx, "Return_Date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                         save_equipment_df(equip_df)
                         st.success("Equipment returned!")
                         st.rerun()
@@ -260,7 +256,7 @@ if st.session_state.get("authentication_status") is True:
     # ====================== PRIVATE RENTAL ======================
     elif st.session_state.page == "Private Rental":
         st.header("➕ Add Private Rental Player")
-        with st.form("private_form"):
+        with st.form("private"):
             c1, c2 = st.columns(2)
             with c1:
                 first = st.text_input("First Name*")
@@ -268,7 +264,7 @@ if st.session_state.get("authentication_status") is True:
                 email = st.text_input("Email")
             with c2:
                 phone = st.text_input("Phone")
-                team = st.text_input("Team / Group", value="Private Rental")
+                team = st.text_input("Team/Group", value="Private Rental")
 
             if st.form_submit_button("Create Player"):
                 if first and last:
@@ -278,8 +274,8 @@ if st.session_state.get("authentication_status") is True:
                         "PlayerID": pid, "First Name": first, "Last Name": last,
                         "Email": email, "Phone": phone, "Team Assignment": team,
                         "Helmet_Taken": False, "Shoulder_Taken": False, "Pants_Taken": False,
-                        "Kneepads_Taken": False, "Thighpads_Taken": False, "Hippads_Taken": False,
-                        "Tailbone_Taken": False, "Belt_Taken": False
+                        "Kneepads_Taken": False, "Thighpads_Taken": False,
+                        "Hippads_Taken": False, "Tailbone_Taken": False, "Belt_Taken": False
                     })
                     equip_df = pd.concat([equip_df, pd.DataFrame([new_row])], ignore_index=True)
                     save_equipment_df(equip_df)
@@ -295,24 +291,26 @@ if st.session_state.get("authentication_status") is True:
 
         taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
                       "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]
-        active = equip_df[
-            (equip_df[taken_cols].applymap(to_bool).any(axis=1)) &
-            (equip_df["Return_Date"].isna() | (equip_df["Return_Date"].astype(str).str.strip() == ""))
-        ]
 
-        if active.empty:
+        active_mask = (
+            equip_df[taken_cols].applymap(to_bool).any(axis=1) &
+            (equip_df["Return_Date"].isna() | (equip_df["Return_Date"].astype(str).str.strip() == ""))
+        )
+        active_df = equip_df[active_mask].copy()
+
+        if active_df.empty:
             st.success("No equipment currently rented out.")
         else:
-            st.subheader("Items Currently Out")
-            totals = {c.replace("_Taken",""): int(active[c].apply(to_bool).sum()) for c in taken_cols}
+            st.subheader("Total Items Out")
+            totals = {c.replace("_Taken", ""): int(active_df[c].apply(to_bool).sum()) for c in taken_cols}
             st.dataframe(pd.DataFrame([totals]), hide_index=True)
 
             st.subheader("By Team")
-            if "Team Assignment" in active.columns:
-                st.dataframe(active.groupby("Team Assignment")[taken_cols].apply(lambda x: x.apply(to_bool).sum()).reset_index())
+            if "Team Assignment" in active_df.columns:
+                st.dataframe(active_df.groupby("Team Assignment")[taken_cols].apply(lambda x: x.apply(to_bool).sum()).reset_index())
 
             st.subheader("Details")
-            display = active[["First Name","Last Name","Team Assignment","Rental Date"] + taken_cols].copy()
+            display = active_df[["First Name", "Last Name", "Team Assignment", "Rental Date"] + taken_cols].copy()
             for c in taken_cols:
                 display[c] = display[c].apply(lambda x: "✅" if to_bool(x) else "")
             st.dataframe(display, hide_index=True)
@@ -321,6 +319,6 @@ if st.session_state.get("authentication_status") is True:
 
 else:
     if st.session_state.get("authentication_status") is False:
-        st.error("Invalid username or password")
+        st.error("Invalid login")
     else:
         st.warning("Please log in")
