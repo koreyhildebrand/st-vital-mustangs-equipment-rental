@@ -15,7 +15,6 @@ from config import (
     SPREADSHEET_KEY, EQUIPMENT_WS, USERS_WS
 )
 
-# ====================== PAGE CONFIG ======================
 st.set_page_config(page_title=TITLE, layout="wide", page_icon=PAGE_ICON)
 st.title(f"🛡️ {TITLE}")
 
@@ -94,7 +93,7 @@ def get_equipment_df() -> pd.DataFrame:
     required_cols = [
         "PlayerID", "First Name", "Last Name", "Rental Date", "Phone", "Email",
         "Team Assignment",
-        "Helmet_Taken", "Helmet_Size", "Helmet_Date",
+        "Helmet_Taken", "Helmet_Size", "Helmet_Type", "Helmet_Date",
         "Shoulder_Taken", "Shoulder_Make", "Shoulder_Size",
         "Pants_Taken", "Pant_Size",
         "Game_Jersey_No", "Practice_Jersey_Color",
@@ -183,49 +182,61 @@ if st.session_state.get("authentication_status") is True:
             status = "🔄 Rented" if summary_parts and not return_date else "✅ Available"
 
             with st.expander(f"**{first} {last}** — {team} | {status} | {current}"):
+                
+                # === DYNAMIC FIELDS (appear immediately when checkbox is checked) ===
+                h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")), key=f"helm_taken_{idx}")
+
+                if h_taken:
+                    h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
+                                          index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Helmet_Size")),
+                                          key=f"helm_size_{idx}")
+                    h_type = st.text_input("Helmet Type", value=str(player.get("Helmet_Type", "")),
+                                           key=f"helm_type_{idx}")
+                    h_date = st.text_input("Helmet Made Date", value=str(player.get("Helmet_Date", "")),
+                                           key=f"helm_date_{idx}")
+                else:
+                    h_size = h_type = h_date = ""
+
+                # Other equipment (can stay in form or also be made dynamic)
                 with st.form(key=f"form_{idx}"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")))
-                        if h_taken:
-                            h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
-                                                  index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Helmet_Size")))
-                            h_date = st.text_input("Helmet Made Date", value=str(player.get("Helmet_Date", "")))
-                        else:
-                            h_size = ""
-                            h_date = str(player.get("Helmet_Date", ""))
-
-                        s_taken = st.checkbox("Shoulder Taken", value=to_bool(player.get("Shoulder_Taken")))
+                        s_taken = st.checkbox("Shoulder Taken", value=to_bool(player.get("Shoulder_Taken")), key=f"shoul_taken_{idx}")
                         if s_taken:
                             s_size = st.selectbox("Shoulder Size", ["","XS","S","M","L","XL","XXL"],
-                                                  index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Shoulder_Size")))
-                            s_make = st.text_input("Shoulder Make", value=str(player.get("Shoulder_Make", "")))
+                                                  index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Shoulder_Size")),
+                                                  key=f"shoul_size_{idx}")
+                            s_make = st.text_input("Shoulder Make", value=str(player.get("Shoulder_Make", "")),
+                                                   key=f"shoul_make_{idx}")
                         else:
                             s_size = s_make = ""
 
-                        p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")))
+                        p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")), key=f"pants_taken_{idx}")
                         if p_taken:
                             p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL"],
-                                                  index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL"], player.get("Pant_Size")))
+                                                  index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL"], player.get("Pant_Size")),
+                                                  key=f"pant_size_{idx}")
                         else:
                             p_size = ""
 
-                        game_jersey = st.text_input("Game Jersey #", value=str(player.get("Game_Jersey_No", "")))
+                        game_jersey = st.text_input("Game Jersey #", value=str(player.get("Game_Jersey_No", "")),
+                                                    key=f"game_jersey_{idx}")
 
                     with col2:
-                        k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")))
-                        t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")))
-                        hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")))
-                        tail_taken = st.checkbox("Tailbone Taken", value=to_bool(player.get("Tailbone_Taken")))
-                        b_taken = st.checkbox("Belt Taken", value=to_bool(player.get("Belt_Taken")))
+                        k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
+                        t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
+                        hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
+                        tail_taken = st.checkbox("Tailbone Taken", value=to_bool(player.get("Tailbone_Taken")), key=f"tail_taken_{idx}")
+                        b_taken = st.checkbox("Belt Taken", value=to_bool(player.get("Belt_Taken")), key=f"belt_taken_{idx}")
 
                         practice_color = st.selectbox("Practice Jersey Color", ["","Red","Black","White","Other"],
-                                                      index=safe_select_index(["","Red","Black","White","Other"], player.get("Practice_Jersey_Color")))
+                                                      index=safe_select_index(["","Red","Black","White","Other"], player.get("Practice_Jersey_Color")),
+                                                      key=f"practice_color_{idx}")
 
                     if st.form_submit_button("💾 Save Rental"):
                         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                         updates = {
-                            "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Date": h_date,
+                            "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Type": h_type, "Helmet_Date": h_date,
                             "Shoulder_Taken": s_taken, "Shoulder_Make": s_make, "Shoulder_Size": s_size,
                             "Pants_Taken": p_taken, "Pant_Size": p_size,
                             "Game_Jersey_No": game_jersey, "Practice_Jersey_Color": practice_color,
@@ -290,8 +301,6 @@ if st.session_state.get("authentication_status") is True:
 
         taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
                       "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]
-
-        # Only use columns that actually exist in the DataFrame
         existing_taken_cols = [col for col in taken_cols if col in equip_df.columns]
 
         if existing_taken_cols:
