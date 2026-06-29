@@ -152,11 +152,11 @@ if st.session_state.get("authentication_status") is True:
     if st.session_state.page == "Rental":
         st.header("📦 Equipment Rental / Return")
 
-        # === UPDATED TOGGLE ===
+        # === TOGGLE: Rented vs Available ===
         show_rented = st.toggle(
             "Show players with rented equipment", 
             value=True,
-            help="ON = Show players who have equipment checked out | OFF = Show available players (no equipment rented)"
+            help="ON = Show players who have equipment checked out | OFF = Show available players"
         )
 
         col1, col2 = st.columns([1, 3])
@@ -176,17 +176,15 @@ if st.session_state.get("authentication_status") is True:
         if search:
             roster = roster[roster.apply(lambda r: search.lower() in str(r.values).lower(), axis=1)]
 
-        # === FILTER LOGIC ===
+        # === FILTER LOGIC (Fixed: applymap → map) ===
         taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
                       "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]
 
         if show_rented:
-            # Show players who have at least one item checked out
-            roster = roster[roster[taken_cols].applymap(to_bool).any(axis=1)]
+            roster = roster[roster[taken_cols].map(to_bool).any(axis=1)]
             st.caption(f"Showing {len(roster)} player(s) with rented equipment")
         else:
-            # Show available players (no equipment checked out)
-            roster = roster[~roster[taken_cols].applymap(to_bool).any(axis=1)]
+            roster = roster[~roster[taken_cols].map(to_bool).any(axis=1)]
             st.caption(f"Showing {len(roster)} available player(s)")
 
         if roster.empty:
