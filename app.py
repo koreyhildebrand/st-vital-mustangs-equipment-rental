@@ -209,16 +209,16 @@ if st.session_state.get("authentication_status") is True:
                 else:
                     s_size = s_make = ""
 
-                # ========== PANTS ==========
+                # ========== PANTS (AXL added) ==========
                 p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")), key=f"pants_taken_{idx}")
                 if p_taken:
-                    p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL"],
-                                          index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL"], player.get("Pant_Size")),
+                    p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"],
+                                          index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"], player.get("Pant_Size")),
                                           key=f"pant_size_{idx}")
                 else:
                     p_size = ""
 
-                # ========== OTHER ITEMS (including Mouthguard) ==========
+                # ========== OTHER ITEMS ==========
                 k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
                 t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
                 hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
