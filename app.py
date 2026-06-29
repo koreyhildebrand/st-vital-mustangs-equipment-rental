@@ -97,7 +97,8 @@ def get_equipment_df() -> pd.DataFrame:
         "Shoulder_Taken", "Shoulder_Make", "Shoulder_Size",
         "Pants_Taken", "Pant_Size",
         "Game_Jersey_No", "Practice_Jersey_Color",
-        "Kneepads_Taken", "Thighpads_Taken", "Hippads_Taken", "Tailbone_Taken", "Belt_Taken",
+        "Kneepads_Taken", "Thighpads_Taken", "Hippads_Taken", "Tailbone_Taken", 
+        "Belt_Taken", "Mouthguard_Taken",
         "Return_Date"
     ]
 
@@ -171,7 +172,8 @@ if st.session_state.get("authentication_status") is True:
             for col, label in [("Helmet_Taken", "Helmet"), ("Shoulder_Taken", "Shoulder"),
                                ("Pants_Taken", "Pants"), ("Kneepads_Taken", "Kneepads"),
                                ("Thighpads_Taken", "Thighpads"), ("Hippads_Taken", "Hippads"),
-                               ("Tailbone_Taken", "Tailbone"), ("Belt_Taken", "Belt")]:
+                               ("Tailbone_Taken", "Tailbone"), ("Belt_Taken", "Belt"),
+                               ("Mouthguard_Taken", "Mouthguard")]:
                 if to_bool(player.get(col)):
                     summary_parts.append(label)
             if player.get("Practice_Jersey_Color"):
@@ -216,12 +218,13 @@ if st.session_state.get("authentication_status") is True:
                 else:
                     p_size = ""
 
-                # ========== OTHER ITEMS ==========
+                # ========== OTHER ITEMS (including Mouthguard) ==========
                 k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
                 t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
                 hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
                 tail_taken = st.checkbox("Tailbone Taken", value=to_bool(player.get("Tailbone_Taken")), key=f"tail_taken_{idx}")
                 b_taken = st.checkbox("Belt Taken", value=to_bool(player.get("Belt_Taken")), key=f"belt_taken_{idx}")
+                m_taken = st.checkbox("Mouthguard Taken", value=to_bool(player.get("Mouthguard_Taken")), key=f"mouth_taken_{idx}")
 
                 practice_color = st.selectbox("Practice Jersey Color", ["","Red","Black","White","Other"],
                                               index=safe_select_index(["","Red","Black","White","Other"], player.get("Practice_Jersey_Color")),
@@ -239,8 +242,9 @@ if st.session_state.get("authentication_status") is True:
                         "Game_Jersey_No": game_jersey, "Practice_Jersey_Color": practice_color,
                         "Kneepads_Taken": k_taken, "Thighpads_Taken": t_taken,
                         "Hippads_Taken": hi_taken, "Tailbone_Taken": tail_taken, "Belt_Taken": b_taken,
+                        "Mouthguard_Taken": m_taken,
                         "Rental Date": now,
-                        "Return_Date": "" if any([h_taken, s_taken, p_taken, k_taken, t_taken, hi_taken, tail_taken, b_taken]) 
+                        "Return_Date": "" if any([h_taken, s_taken, p_taken, k_taken, t_taken, hi_taken, tail_taken, b_taken, m_taken]) 
                                        else player.get("Return_Date", "")
                     }
                     for k, v in updates.items():
@@ -250,16 +254,17 @@ if st.session_state.get("authentication_status") is True:
                     st.success("Rental saved successfully!")
                     st.rerun()
 
-                if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]) and not return_date:
+                # Return section
+                if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]) and not return_date:
                     if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
-                        for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]:
+                        for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]:
                             equip_df.loc[idx, c] = False
                         equip_df.loc[idx, "Return_Date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                         save_equipment_df(equip_df)
                         st.success("Equipment returned!")
                         st.rerun()
 
-    # ====================== PRIVATE RENTAL (UPDATED) ======================
+    # ====================== PRIVATE RENTAL ======================
     elif st.session_state.page == "Private Rental":
         st.header("➕ Add Private Rental Player")
         st.caption("Fill in the details below and click Create Player. Fields will clear automatically after adding.")
@@ -294,11 +299,12 @@ if st.session_state.get("authentication_status") is True:
                         "Thighpads_Taken": False,
                         "Hippads_Taken": False,
                         "Tailbone_Taken": False,
-                        "Belt_Taken": False
+                        "Belt_Taken": False,
+                        "Mouthguard_Taken": False
                     })
                     equip_df = pd.concat([equip_df, pd.DataFrame([new_row])], ignore_index=True)
                     save_equipment_df(equip_df)
-                    st.success(f"✅ Player '{first} {last}' added successfully! You can now add another player.")
+                    st.success(f"✅ Player '{first} {last}' added successfully!")
                 else:
                     st.error("First Name and Last Name are required.")
 
@@ -310,7 +316,7 @@ if st.session_state.get("authentication_status") is True:
             st.rerun()
 
         taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
-                      "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]
+                      "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]
         existing_taken_cols = [col for col in taken_cols if col in equip_df.columns]
 
         if existing_taken_cols:
