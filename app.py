@@ -89,7 +89,6 @@ def get_equipment_df() -> pd.DataFrame:
         st.error(f"Error loading Equipment: {str(e)}")
         return pd.DataFrame()
 
-    # Force object dtype to prevent Arrow typing errors
     df = df.astype(object)
 
     required_cols = [
@@ -237,13 +236,13 @@ if st.session_state.get("authentication_status") is True:
                                            else player.get("Return_Date", "")
                         }
                         for k, v in updates.items():
-                            equip_df.loc[idx, k] = v          # ← Using .loc[] instead of .at[]
+                            equip_df.loc[idx, k] = v
 
                         save_equipment_df(equip_df)
                         st.success("Saved successfully!")
                         st.rerun()
 
-                # Return button
+                # Return section
                 if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]) and not return_date:
                     if st.button("🔄 Return Equipment", key=f"ret_{idx}"):
                         for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]:
@@ -292,27 +291,34 @@ if st.session_state.get("authentication_status") is True:
         taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
                       "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken"]
 
-        active_mask = (
-            equip_df[taken_cols].applymap(to_bool).any(axis=1) &
-            (equip_df["Return_Date"].isna() | (equip_df["Return_Date"].astype(str).str.strip() == ""))
-        )
-        active_df = equip_df[active_mask].copy()
+        # Only use columns that actually exist in the DataFrame
+        existing_taken_cols = [col for col in taken_cols if col in equip_df.columns]
+
+        if existing_taken_cols:
+            active_mask = (
+                equip_df[existing_taken_cols].map(to_bool).any(axis=1) &
+                (equip_df["Return_Date"].isna() | (equip_df["Return_Date"].astype(str).str.strip() == ""))
+            )
+            active_df = equip_df[active_mask].copy()
+        else:
+            active_df = pd.DataFrame()
 
         if active_df.empty:
             st.success("No equipment currently rented out.")
         else:
             st.subheader("Total Items Out")
-            totals = {c.replace("_Taken", ""): int(active_df[c].apply(to_bool).sum()) for c in taken_cols}
+            totals = {c.replace("_Taken", ""): int(active_df[c].map(to_bool).sum()) for c in existing_taken_cols}
             st.dataframe(pd.DataFrame([totals]), hide_index=True)
 
             st.subheader("By Team")
             if "Team Assignment" in active_df.columns:
-                st.dataframe(active_df.groupby("Team Assignment")[taken_cols].apply(lambda x: x.apply(to_bool).sum()).reset_index())
+                st.dataframe(active_df.groupby("Team Assignment")[existing_taken_cols].apply(lambda x: x.map(to_bool).sum()).reset_index())
 
             st.subheader("Details")
-            display = active_df[["First Name", "Last Name", "Team Assignment", "Rental Date"] + taken_cols].copy()
-            for c in taken_cols:
-                display[c] = display[c].apply(lambda x: "✅" if to_bool(x) else "")
+            display_cols = ["First Name", "Last Name", "Team Assignment", "Rental Date"] + existing_taken_cols
+            display = active_df[[c for c in display_cols if c in active_df.columns]].copy()
+            for c in existing_taken_cols:
+                display[c] = display[c].map(lambda x: "✅" if to_bool(x) else "")
             st.dataframe(display, hide_index=True)
 
     st.caption(f"St. Vital Mustangs Equipment Manager | {VERSION}")
