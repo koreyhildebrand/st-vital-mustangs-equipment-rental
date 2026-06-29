@@ -27,68 +27,47 @@ st.markdown("""
 if "page" not in st.session_state:
     st.session_state.page = "Rental"
 
-# ====================== CACHED SHEET CLIENT ======================
-@st.cache_resource
-def get_sheet_client():
-    """Cache the Google Sheets client to reduce authentication overhead."""
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds_dict = st.secrets["gcp_service_account"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    return gspread.authorize(creds)
-
-# ====================== INITIALIZATION WITH RETRY ======================
+# ====================== INITIALIZATION ======================
 def init_services():
-    """Initialize with strong retry logic for rate limits."""
-    max_retries = 6
-    base_delay = 8  # seconds
+    try:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds_dict = st.secrets["gcp_service_account"]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(creds)
 
-    for attempt in range(max_retries):
-        try:
-            client = get_sheet_client()
+        if SPREADSHEET_KEY:
+            sheet = client.open_by_key(SPREADSHEET_KEY)
+        else:
+            sheet = client.open("StVitalMustangs_Equipment_Rentals")
 
-            if SPREADSHEET_KEY:
-                sheet = client.open_by_key(SPREADSHEET_KEY)
-            else:
-                sheet = client.open("StVitalMustangs_Equipment_Rentals")
+        users_ws = sheet.worksheet(USERS_WS)
+        user_data = users_ws.get_all_records()
 
-            # Read Users sheet
-            users_ws = sheet.worksheet(USERS_WS)
-            user_data = users_ws.get_all_records()
+        credentials = {"usernames": {}}
+        for user in user_data:
+            uname = str(user.get("username", "")).strip().lower()
+            if uname:
+                credentials["usernames"][uname] = {
+                    "name": user.get("name", uname),
+                    "email": user.get("email", ""),
+                    "password": user.get("password", ""),
+                }
 
-            credentials = {"usernames": {}}
-            for user in user_data:
-                uname = str(user.get("username", "")).strip().lower()
-                if uname:
-                    credentials["usernames"][uname] = {
-                        "name": user.get("name", uname),
-                        "email": user.get("email", ""),
-                        "password": user.get("password", ""),
-                    }
+        authenticator = stauth.Authenticate(
+            credentials=credentials,
+            cookie_name=COOKIE_NAME,
+            key=COOKIE_KEY,
+            cookie_expiry_days=COOKIE_EXPIRY_DAYS,
+        )
 
-            authenticator = stauth.Authenticate(
-                credentials=credentials,
-                cookie_name=COOKIE_NAME,
-                key=COOKIE_KEY,
-                cookie_expiry_days=COOKIE_EXPIRY_DAYS,
-            )
+        st.session_state.sheet = sheet
+        st.session_state.authenticator = authenticator
+        return authenticator, sheet
 
-            st.session_state.sheet = sheet
-            st.session_state.authenticator = authenticator
-            return authenticator, sheet
+    except Exception as e:
+        st.error(f"Setup error: {str(e)}")
+        st.stop()
 
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    st.warning(f"Google Sheets rate limit hit. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-                    time.sleep(delay)
-                else:
-                    st.error("Google Sheets is currently rate limited. Please wait 1-2 minutes and refresh the page.")
-                    st.stop()
-            else:
-                st.error(f"Setup error: {error_str}")
-                st.stop()
 
 authenticator, sheet = init_services()
 
@@ -98,7 +77,7 @@ def to_bool(val) -> bool:
         return False
     return str(val).strip().lower() in ["true", "1", "yes", "t"]
 
-@st.cache_data(ttl=120)  # Increased to 2 minutes
+@st.cache_data(ttl=120)
 def get_equipment_df() -> pd.DataFrame:
     ws = st.session_state.sheet.worksheet(EQUIPMENT_WS)
     try:
@@ -173,9 +152,11 @@ if st.session_state.get("authentication_status") is True:
     if st.session_state.page == "Rental":
         st.header("📦 Equipment Rental / Return")
 
-        show_only_checked_out = st.toggle(
-            "Show only players with equipment checked out", 
-            value=False
+        # === UPDATED TOGGLE ===
+        show_rented = st.toggle(
+            "Show players with rented equipment", 
+            value=True,
+            help="ON = Show players who have equipment checked out | OFF = Show available players (no equipment rented)"
         )
 
         col1, col2 = st.columns([1, 3])
@@ -195,10 +176,18 @@ if st.session_state.get("authentication_status") is True:
         if search:
             roster = roster[roster.apply(lambda r: search.lower() in str(r.values).lower(), axis=1)]
 
-        if show_only_checked_out:
-            taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
-                          "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]
+        # === FILTER LOGIC ===
+        taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
+                      "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]
+
+        if show_rented:
+            # Show players who have at least one item checked out
             roster = roster[roster[taken_cols].applymap(to_bool).any(axis=1)]
+            st.caption(f"Showing {len(roster)} player(s) with rented equipment")
+        else:
+            # Show available players (no equipment checked out)
+            roster = roster[~roster[taken_cols].applymap(to_bool).any(axis=1)]
+            st.caption(f"Showing {len(roster)} available player(s)")
 
         if roster.empty:
             st.info("No players match the current filters.")
@@ -287,7 +276,7 @@ if st.session_state.get("authentication_status") is True:
                             equip_df.loc[idx, k] = v
 
                         save_equipment_df(equip_df)
-                        st.success("Changes saved!")
+                        st.success("Changes saved to Google Sheet!")
                         st.rerun()
 
                     if any(to_bool(player.get(c)) for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]) and not return_date:
@@ -295,7 +284,7 @@ if st.session_state.get("authentication_status") is True:
                             for c in ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken","Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]:
                                 equip_df.loc[idx, c] = False
                             equip_df.loc[idx, "Return_Date"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                            st.info("Return recorded. Click Save Rental to persist.")
+                            st.info("Return recorded. Click **Save Rental** to write changes.")
                             st.rerun()
 
     # ====================== PRIVATE RENTAL ======================
