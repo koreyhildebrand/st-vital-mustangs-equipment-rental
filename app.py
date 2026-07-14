@@ -27,47 +27,69 @@ st.markdown("""
 if "page" not in st.session_state:
     st.session_state.page = "Rental"
 
-# ====================== INITIALIZATION ======================
+# ====================== CACHED GOOGLE SHEETS CLIENT ======================
+@st.cache_resource
+def get_gspread_client_and_sheet():
+    """Cache the gspread client and spreadsheet so we don't re-authenticate on every rerun."""
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds_dict = st.secrets["gcp_service_account"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    client = gspread.authorize(creds)
+
+    if SPREADSHEET_KEY:
+        sheet = client.open_by_key(SPREADSHEET_KEY)
+    else:
+        sheet = client.open("StVitalMustangs_Equipment_Rentals")
+    return client, sheet
+
+# ====================== INITIALIZATION WITH RETRY ======================
 def init_services():
-    try:
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds_dict = st.secrets["gcp_service_account"]
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        client = gspread.authorize(creds)
+    """Initialize with caching + retry logic to avoid 429 quota errors."""
+    max_retries = 5
+    base_delay = 6
 
-        if SPREADSHEET_KEY:
-            sheet = client.open_by_key(SPREADSHEET_KEY)
-        else:
-            sheet = client.open("StVitalMustangs_Equipment_Rentals")
+    for attempt in range(max_retries):
+        try:
+            client, sheet = get_gspread_client_and_sheet()
 
-        users_ws = sheet.worksheet(USERS_WS)
-        user_data = users_ws.get_all_records()
+            # Read Users sheet (now only happens once thanks to caching above)
+            users_ws = sheet.worksheet(USERS_WS)
+            user_data = users_ws.get_all_records()
 
-        credentials = {"usernames": {}}
-        for user in user_data:
-            uname = str(user.get("username", "")).strip().lower()
-            if uname:
-                credentials["usernames"][uname] = {
-                    "name": user.get("name", uname),
-                    "email": user.get("email", ""),
-                    "password": user.get("password", ""),
-                }
+            credentials = {"usernames": {}}
+            for user in user_data:
+                uname = str(user.get("username", "")).strip().lower()
+                if uname:
+                    credentials["usernames"][uname] = {
+                        "name": user.get("name", uname),
+                        "email": user.get("email", ""),
+                        "password": user.get("password", ""),
+                    }
 
-        authenticator = stauth.Authenticate(
-            credentials=credentials,
-            cookie_name=COOKIE_NAME,
-            key=COOKIE_KEY,
-            cookie_expiry_days=COOKIE_EXPIRY_DAYS,
-        )
+            authenticator = stauth.Authenticate(
+                credentials=credentials,
+                cookie_name=COOKIE_NAME,
+                key=COOKIE_KEY,
+                cookie_expiry_days=COOKIE_EXPIRY_DAYS,
+            )
 
-        st.session_state.sheet = sheet
-        st.session_state.authenticator = authenticator
-        return authenticator, sheet
+            st.session_state.sheet = sheet
+            st.session_state.authenticator = authenticator
+            return authenticator, sheet
 
-    except Exception as e:
-        st.error(f"Setup error: {str(e)}")
-        st.stop()
-
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    st.warning(f"Google Sheets rate limit hit. Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                else:
+                    st.error("Google Sheets quota exceeded. Please wait 1–2 minutes and refresh the page.")
+                    st.stop()
+            else:
+                st.error(f"Setup error: {error_str}")
+                st.stop()
 
 authenticator, sheet = init_services()
 
@@ -112,9 +134,8 @@ def get_equipment_df() -> pd.DataFrame:
     return df
 
 def save_equipment_df(df: pd.DataFrame):
-    """Save DataFrame to Google Sheet safely (prevents InvalidJSONError)."""
+    """Save DataFrame to Google Sheet safely."""
     ws = st.session_state.sheet.worksheet(EQUIPMENT_WS)
-    # Force everything to string — this fixes the InvalidJSONError
     df_clean = df.fillna("").astype(str)
     ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
     st.cache_data.clear()
