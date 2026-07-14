@@ -30,7 +30,6 @@ if "page" not in st.session_state:
 # ====================== CACHED GOOGLE SHEETS CLIENT ======================
 @st.cache_resource
 def get_gspread_client_and_sheet():
-    """Cache the gspread client and spreadsheet so we don't re-authenticate on every rerun."""
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds_dict = st.secrets["gcp_service_account"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
@@ -44,7 +43,6 @@ def get_gspread_client_and_sheet():
 
 # ====================== INITIALIZATION WITH RETRY ======================
 def init_services():
-    """Initialize with caching + retry logic to avoid 429 quota errors."""
     max_retries = 5
     base_delay = 6
 
@@ -52,7 +50,6 @@ def init_services():
         try:
             client, sheet = get_gspread_client_and_sheet()
 
-            # Read Users sheet (now only happens once thanks to caching above)
             users_ws = sheet.worksheet(USERS_WS)
             user_data = users_ws.get_all_records()
 
@@ -117,7 +114,7 @@ def get_equipment_df() -> pd.DataFrame:
     required_cols = [
         "PlayerID", "First Name", "Last Name", "Rental Date", "Phone", "Email",
         "Team Assignment",
-        "Helmet_Taken", "Helmet_Size", "Helmet_Type", "Helmet_Date",
+        "Helmet_Taken", "Helmet_Size", "Helmet_Date",
         "Shoulder_Taken", "Shoulder_Make", "Shoulder_Size",
         "Pants_Taken", "Pant_Size",
         "Game_Jersey_No", "Practice_Jersey_Color",
@@ -134,7 +131,6 @@ def get_equipment_df() -> pd.DataFrame:
     return df
 
 def save_equipment_df(df: pd.DataFrame):
-    """Save DataFrame to Google Sheet safely."""
     ws = st.session_state.sheet.worksheet(EQUIPMENT_WS)
     df_clean = df.fillna("").astype(str)
     ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
@@ -234,36 +230,43 @@ if st.session_state.get("authentication_status") is True:
 
                 with st.expander(f"**{first} {last}** — {team} | {status} | {current}"):
 
+                    # ========== HELMET ==========
                     h_taken = st.checkbox("Helmet Taken", value=to_bool(player.get("Helmet_Taken")), key=f"helm_taken_{idx}")
                     if h_taken:
-                        h_size = st.selectbox("Helmet Size", ["","XS","S","M","L","XL","XXL"],
-                                              index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Helmet_Size")),
-                                              key=f"helm_size_{idx}")
-                        h_type = st.text_input("Helmet Type", value=str(player.get("Helmet_Type", "")),
-                                               key=f"helm_type_{idx}")
+                        helmet_sizes = ["XS", "S", "M", "L", "XL", "XXL"]
+                        h_size = st.radio("Helmet Size", helmet_sizes, 
+                                          index=safe_select_index(helmet_sizes, player.get("Helmet_Size")),
+                                          horizontal=True, key=f"helm_size_{idx}")
                         h_date = st.text_input("Helmet Made Date", value=str(player.get("Helmet_Date", "")),
                                                key=f"helm_date_{idx}")
                     else:
-                        h_size = h_type = h_date = ""
+                        h_size = ""
+                        h_date = ""
 
+                    # ========== SHOULDER PADS ==========
                     s_taken = st.checkbox("Shoulder Pads Taken", value=to_bool(player.get("Shoulder_Taken")), key=f"shoul_taken_{idx}")
                     if s_taken:
-                        s_size = st.selectbox("Shoulder Size", ["","XS","S","M","L","XL","XXL"],
-                                              index=safe_select_index(["","XS","S","M","L","XL","XXL"], player.get("Shoulder_Size")),
-                                              key=f"shoul_size_{idx}")
+                        shoulder_sizes = ["XS", "S", "M", "L", "XL", "XXL"]
+                        s_size = st.radio("Shoulder Size", shoulder_sizes,
+                                          index=safe_select_index(shoulder_sizes, player.get("Shoulder_Size")),
+                                          horizontal=True, key=f"shoul_size_{idx}")
                         s_make = st.text_input("Shoulder Make / Brand", value=str(player.get("Shoulder_Make", "")),
                                                key=f"shoul_make_{idx}")
                     else:
-                        s_size = s_make = ""
+                        s_size = ""
+                        s_make = ""
 
+                    # ========== PANTS ==========
                     p_taken = st.checkbox("Pants Taken", value=to_bool(player.get("Pants_Taken")), key=f"pants_taken_{idx}")
                     if p_taken:
-                        p_size = st.selectbox("Pant Size", ["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"],
-                                              index=safe_select_index(["","YXS","YS","YM","YL","YXL","AS","AM","AL","AXL"], player.get("Pant_Size")),
-                                              key=f"pant_size_{idx}")
+                        pant_sizes = ["YXS", "YS", "YM", "YL", "YXL", "AS", "AM", "AL", "AXL"]
+                        p_size = st.radio("Pant Size", pant_sizes,
+                                          index=safe_select_index(pant_sizes, player.get("Pant_Size")),
+                                          horizontal=True, key=f"pant_size_{idx}")
                     else:
                         p_size = ""
 
+                    # ========== OTHER ITEMS ==========
                     k_taken = st.checkbox("Kneepads Taken", value=to_bool(player.get("Kneepads_Taken")), key=f"knee_taken_{idx}")
                     t_taken = st.checkbox("Thighpads Taken", value=to_bool(player.get("Thighpads_Taken")), key=f"thigh_taken_{idx}")
                     hi_taken = st.checkbox("Hippads Taken", value=to_bool(player.get("Hippads_Taken")), key=f"hip_taken_{idx}")
@@ -281,7 +284,7 @@ if st.session_state.get("authentication_status") is True:
                     if st.button("💾 Save Rental", key=f"save_{idx}", type="primary"):
                         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                         updates = {
-                            "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Type": h_type, "Helmet_Date": h_date,
+                            "Helmet_Taken": h_taken, "Helmet_Size": h_size, "Helmet_Date": h_date,
                             "Shoulder_Taken": s_taken, "Shoulder_Make": s_make, "Shoulder_Size": s_size,
                             "Pants_Taken": p_taken, "Pant_Size": p_size,
                             "Game_Jersey_No": game_jersey, "Practice_Jersey_Color": practice_color,
