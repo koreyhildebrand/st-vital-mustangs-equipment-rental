@@ -112,8 +112,11 @@ def get_equipment_df() -> pd.DataFrame:
     return df
 
 def save_equipment_df(df: pd.DataFrame):
+    """Save DataFrame to Google Sheet safely (prevents InvalidJSONError)."""
     ws = st.session_state.sheet.worksheet(EQUIPMENT_WS)
-    ws.update([df.columns.values.tolist()] + df.fillna("").values.tolist())
+    # Force everything to string — this fixes the InvalidJSONError
+    df_clean = df.fillna("").astype(str)
+    ws.update([df_clean.columns.values.tolist()] + df_clean.values.tolist())
     st.cache_data.clear()
 
 def generate_player_id(first: str, last: str) -> str:
@@ -152,7 +155,6 @@ if st.session_state.get("authentication_status") is True:
     if st.session_state.page == "Rental":
         st.header("📦 Equipment Rental / Return")
 
-        # === TOGGLE: Rented vs Available ===
         show_rented = st.toggle(
             "Show players with rented equipment", 
             value=True,
@@ -176,7 +178,6 @@ if st.session_state.get("authentication_status") is True:
         if search:
             roster = roster[roster.apply(lambda r: search.lower() in str(r.values).lower(), axis=1)]
 
-        # === FILTER LOGIC (Fixed: applymap → map) ===
         taken_cols = ["Helmet_Taken","Shoulder_Taken","Pants_Taken","Kneepads_Taken",
                       "Thighpads_Taken","Hippads_Taken","Tailbone_Taken","Belt_Taken","Mouthguard_Taken"]
 
